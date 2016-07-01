@@ -1,0 +1,29 @@
+#!/bin/bash
+
+set -eo pipefail
+
+version=${GOVERSION:-1.6.2}
+dist=${GODIST:-$OPENSHIFT_DIY_DIR/cache/go-$version}
+
+RUN_CMD="revel"
+RUN_ARGS="run github.com/leanote/leanote prod"
+
+REVEL_PID="${OPENSHIFT_DATA_DIR}revel.pid"
+REVEL_LOG="${OPENSHIFT_LOG_DIR}revel.log"
+
+export GOROOT=$dist/go
+export PATH=$PATH:$GOROOT/bin
+export GOPATH="$OPENSHIFT_REPO_DIR"
+export PATH="$PATH:$GOPATH/bin"
+export MONGODB_URL="${OPENSHIFT_MONGODB_DB_URL}${OPENSHIFT_APP_NAME}"
+
+echo -n "Starting: "
+
+if [ -f $REVEL_PID ]; then
+   echo "revel (pid `cat $REVEL_PID`) already running"
+   exit 0
+fi
+
+nohup $RUN_CMD $RUN_ARGS > $REVEL_LOG 2>&1 &
+echo $! > $REVEL_PID
+echo "revel (pid `cat $REVEL_PID`) started."

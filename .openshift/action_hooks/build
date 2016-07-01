@@ -1,0 +1,79 @@
+#!/bin/bash
+
+version=${GOVERSION:-1.6.2}
+srcfile=${GOFILE:-go$version.$(uname|tr A-Z a-z)-amd64.tar.gz}
+url=${GOURL:-https://storage.googleapis.com/golang/$srcfile}
+dist=${GODIST:-$OPENSHIFT_DIY_DIR/cache/go-$version}
+APP_CONFIG="${OPENSHIFT_REPO_DIR}src/github.com/leanote/leanote/conf/app.conf"
+INIT_FILE="${OPENSHIFT_DATA_DIR}inited"
+
+if [ -d $dist/go ]; then
+    echo "Use Go $version."
+else
+    mkdir -p $dist
+    cd $dist    
+    echo "Installing Go $version"
+    echo "Download..."
+    curl -sO $url
+    echo "Unzip..."
+    tar zxf $srcfile
+    rm -f $srcfile
+    echo "done"
+fi
+
+echo "Setting GOPATHS"
+
+export GOROOT=$dist/go
+export PATH=$PATH:$GOROOT/bin
+export GOPATH="$OPENSHIFT_REPO_DIR"
+export PATH="$PATH:$GOPATH/bin"
+
+echo "Get Go 3rd packages:"
+
+echo "Fetching Revel web framework..."
+
+go get github.com/revel/revel
+
+echo "Building Revel web framework..."
+
+go get github.com/revel/cmd/revel
+go install github.com/revel/cmd/revel
+
+cd $OPENSHIFT_REPO_DIR
+
+if [ ! -d ${OPENSHIFT_REPO_DIR}/src/github.com/leanote ]; then
+
+    echo "Fetching leanote..."
+    go get github.com/leanote/leanote/app
+
+fi
+
+echo "Setting leanote..."
+
+if [ -f $INIT_FILE ]; then
+    echo "App data has benn inited, skip it..."
+    secret=$(cat $INIT_FILE)
+else
+    echo "Starting init app data"
+
+    $OPENSHIFT_MONGODB_DIR/bin/control start
+
+    secret=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 64 | head -n 1)
+    echo $secret > $INIT_FILE
+
+    mongorestore -h $OPENSHIFT_MONGODB_DB_HOST \
+     -u $OPENSHIFT_MONGODB_DB_USERNAME \
+     -p $OPENSHIFT_MONGODB_DB_PASSWORD \
+     -d $OPENSHIFT_APP_NAME \
+     --dir "${OPENSHIFT_REPO_DIR}src/github.com/leanote/leanote/mongodb_backup/leanote_install_data/"
+
+fi
+
+echo "Setting app..."
+
+sed -i -- 's/http\.port\=9000/http\.port=${OPENSHIFT_DIY_PORT}/g' $APP_CONFIG
+sed -i -- 's/http\.addr\=/http\.addr\=${OPENSHIFT_DIY_IP}/g' $APP_CONFIG
+sed -i -- "s/localhost\:9000/${OPENSHIFT_APP_DNS}/g" $APP_CONFIG
+sed -i -- '/^db/s/db\./# db\./g' $APP_CONFIG
+sed -i -- 's/# db\.urlEnv/db\.urlEnv/g' $APP_CONFIG
+sed -i -- "s/app\.secret\=.*$/app\.secret\=$secret/g" $APP_CONFIG
